@@ -1,0 +1,304 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
+using System.Drawing;
+using System.Linq;
+using System.Threading.Tasks;
+using ATAS.Indicators;
+using ATAS.DataFeedsCore;
+using OFT.Rendering.Context;
+using OFT.Rendering.Tools;
+
+namespace CustomIndicators
+{
+    [DisplayName("Gamma Regime (0DTE)")]
+    [Category("OFK Suite")]
+    public class GammaChipIndicator : Indicator
+    {
+        #region Enums
+
+        public enum UpdateFrequency { Live, ThirtySeconds, OneMinute, FiveMinutes, ThirtyMinutes, OneHour }
+
+        public enum HorizontalAlignment { Left, Right }
+        public enum VerticalAlignment { Top, Bottom }
+
+        #endregion
+
+        #region Properties
+
+        [Display(Name = "Strikes Per Side", GroupName = "1. Options Data", Order = 1)]
+        [Range(5, 100)]
+        public int StrikesPerSide { get; set; } = 25;
+
+        [Display(Name = "0DTE Only", GroupName = "1. Options Data", Order = 2)]
+        public bool ZeroDteOnly { get; set; } = true;
+
+        [Display(Name = "Show Net GEX Value", GroupName = "1. Options Data", Order = 3)]
+        public bool ShowGexValue { get; set; } = true;
+
+        [Display(Name = "Show Expiry (DTE)", GroupName = "1. Options Data", Order = 4)]
+        public bool ShowExpiry { get; set; } = true;
+
+        [Display(Name = "Update Frequency", GroupName = "1. Options Data", Order = 5)]
+        public UpdateFrequency Frequency { get; set; } = UpdateFrequency.FiveMinutes;
+
+        [Display(Name = "Horizontal Position", GroupName = "2. Layout & Sizing", Order = 1)]
+        public HorizontalAlignment HorizontalPosition { get; set; } = HorizontalAlignment.Left;
+
+        [Display(Name = "Vertical Position", GroupName = "2. Layout & Sizing", Order = 2)]
+        public VerticalAlignment VerticalPosition { get; set; } = VerticalAlignment.Top;
+
+        [Display(Name = "Offset X", GroupName = "2. Layout & Sizing", Order = 3)]
+        [Range(0, 2000)]
+        public int OffsetX { get; set; } = 20;
+
+        [Display(Name = "Offset Y", GroupName = "2. Layout & Sizing", Order = 4)]
+        [Range(0, 2000)]
+        public int OffsetY { get; set; } = 20;
+
+        [Display(Name = "Font Size", GroupName = "2. Layout & Sizing", Order = 5)]
+        [Range(8, 30)]
+        public int FontSize
+        {
+            get => (int)_font.Size;
+            set
+            {
+                if ((int)_font.Size == value) return;
+                _font = new RenderFont("Arial", value, FontStyle.Bold);
+            }
+        }
+
+        [Display(Name = "Chip Padding", GroupName = "2. Layout & Sizing", Order = 6)]
+        [Range(0, 30)]
+        public int Padding { get; set; } = 8;
+
+        [Display(Name = "+ Gamma Color", GroupName = "3. Colors", Order = 1)]
+        public Color PositiveColor { get; set; } = Color.FromArgb(255, 0, 200, 80);
+
+        [Display(Name = "- Gamma Color", GroupName = "3. Colors", Order = 2)]
+        public Color NegativeColor { get; set; } = Color.FromArgb(255, 230, 50, 50);
+
+        [Display(Name = "Text Color", GroupName = "3. Colors", Order = 3)]
+        public Color TextColor { get; set; } = Color.White;
+
+        #endregion
+
+        #region Fields
+
+        private DateTime _lastCalculationTime = DateTime.MinValue;
+        private RenderFont _font = new("Arial", 12, FontStyle.Bold);
+        private decimal _lastNetGex = 0m;
+        private bool _isPositiveGamma = true;
+        private string _chipText = "Loading GEX...";
+
+        #endregion
+
+        public GammaChipIndicator() : base(true)
+        {
+            DenyToChangePanel = true;
+            EnableCustomDrawing = true;
+            SubscribeToDrawingEvents(DrawingLayouts.LatestBar | DrawingLayouts.Final);
+
+            DataSeries[0].IsHidden = true;
+            ((ValueDataSeries)DataSeries[0]).VisualType = VisualMode.Hide;
+        }
+
+        protected override void OnCalculate(int bar, decimal value)
+        {
+            if (bar < CurrentBar - 1) return;
+
+            // Snap updates to clean clock intervals (30 sec, top of the minute, 5 min, 30 min, hour)
+            if (Frequency != UpdateFrequency.Live && _chipText != "Loading GEX...")
+            {
+                var now = DateTime.Now;
+                bool shouldUpdate = Frequency switch
+                {
+                    UpdateFrequency.ThirtySeconds => now.Second == 0 || now.Second == 30,
+                    UpdateFrequency.OneMinute => now.Second == 0,
+                    UpdateFrequency.FiveMinutes => now.Minute % 5 == 0 && now.Second == 0,
+                    UpdateFrequency.ThirtyMinutes => now.Minute % 30 == 0 && now.Second == 0,
+                    UpdateFrequency.OneHour => now.Minute == 0 && now.Second == 0,
+                    _ => true
+                };
+
+                if (!shouldUpdate) return;
+
+                // Prevent multiple calculations inside the same matching time slot
+                if (Frequency == UpdateFrequency.ThirtySeconds && _lastCalculationTime.Minute == now.Minute && _lastCalculationTime.Second / 30 == now.Second / 30) return;
+                if (Frequency == UpdateFrequency.OneMinute && _lastCalculationTime.Minute == now.Minute) return;
+                if (Frequency == UpdateFrequency.FiveMinutes && _lastCalculationTime.Minute / 5 == now.Minute / 5 && _lastCalculationTime.Hour == now.Hour) return;
+                if (Frequency == UpdateFrequency.ThirtyMinutes && _lastCalculationTime.Minute / 30 == now.Minute / 30 && _lastCalculationTime.Hour == now.Hour) return;
+                if (Frequency == UpdateFrequency.OneHour && _lastCalculationTime.Hour == now.Hour) return;
+
+                _lastCalculationTime = now;
+            }
+
+            var provider = OptionsDataProvider;
+            if (provider == null)
+            {
+                _chipText = "NO OPTIONS DATA";
+                return;
+            }
+
+            var candle = GetCandle(bar);
+            if (candle == null) return;
+            decimal spot = candle.Close;
+
+            try
+            {
+                var type = provider.GetType().GetInterfaces().FirstOrDefault(i => i.Name.Contains("OptionsDataProvider")) ?? provider.GetType();
+                var seriesMethod = type.GetMethod("GetOptionSeriesAsync");
+
+                if (seriesMethod != null)
+                {
+                    var task = seriesMethod.Invoke(provider, new object[] { System.Threading.CancellationToken.None });
+                    var rawResult = task?.GetType().GetProperty("Result")?.GetValue(task) as System.Collections.IEnumerable;
+
+                    if (rawResult != null)
+                    {
+                        var seriesList = rawResult.Cast<dynamic>().ToList();
+
+                        if (seriesList.Any())
+                        {
+                            var targetSeries = ZeroDteOnly
+                                ? seriesList.FirstOrDefault(s => s.Expiration.Date == DateTime.Today) ?? seriesList.OrderBy(s => s.Expiration).FirstOrDefault()
+                                : seriesList.OrderBy(s => s.Expiration).FirstOrDefault();
+
+                            if (targetSeries != null)
+                            {
+                                DateTime expDate = targetSeries.Expiration;
+                                int dte = (expDate.Date - DateTime.Today).Days;
+                                if (dte < 0) dte = 0;
+                                string dteString = $"{dte}DTE";
+
+                                var optionsMethod = type.GetMethod("GetOptionsAsync");
+                                var optionsTask = optionsMethod?.Invoke(provider, new object[] { targetSeries, System.Threading.CancellationToken.None });
+                                var rawOptions = optionsTask?.GetType().GetProperty("Result")?.GetValue(optionsTask) as System.Collections.IEnumerable;
+
+                                if (rawOptions != null)
+                                {
+                                    var contracts = rawOptions.Cast<dynamic>().ToList();
+
+                                    var closestContracts = contracts
+                                        .OrderBy(x => Math.Abs((decimal)x.StrikePrice - spot))
+                                        .Take(StrikesPerSide * 4)
+                                        .ToList();
+
+                                    decimal totalCallGex = 0m;
+                                    decimal totalPutGex = 0m;
+                                    var subMethod = type.GetMethod("SubscribeToOption");
+
+                                    foreach (dynamic contract in closestContracts)
+                                    {
+                                        try
+                                        {
+                                            decimal strikePrice = (decimal)contract.StrikePrice;
+                                            string optType = contract.OptionType.ToString();
+                                            decimal oi = 0m;
+
+                                            try { oi = (decimal)contract.OpenInterest; }
+                                            catch { }
+
+                                            if (oi <= 0)
+                                            {
+                                                var subInstance = subMethod?.Invoke(provider, new object[] { contract });
+                                                if (subInstance != null)
+                                                {
+                                                    var summaryProp = subInstance.GetType().GetProperty("Summary");
+                                                    var summaryObj = summaryProp?.GetValue(subInstance);
+
+                                                    if (summaryObj != null)
+                                                    {
+                                                        try { oi = (decimal)summaryObj.GetType().GetProperty("OpenInterest")?.GetValue(summaryObj); }
+                                                        catch { }
+                                                    }
+                                                }
+                                            }
+
+                                            if (oi <= 0) continue;
+
+                                            decimal distance = Math.Abs(spot - strikePrice);
+                                            decimal weight = distance > 0 ? 100m / (1m + (distance / 5m)) : 100m;
+                                            decimal estimatedGamma = 0.005m * weight;
+
+                                            if (optType.Contains("Call"))
+                                                totalCallGex += estimatedGamma * oi * spot * 100m;
+                                            else if (optType.Contains("Put"))
+                                                totalPutGex += estimatedGamma * oi * spot * 100m;
+                                        }
+                                        catch { continue; }
+                                    }
+
+                                    _lastNetGex = totalCallGex - totalPutGex;
+                                    _isPositiveGamma = _lastNetGex >= 0;
+
+                                    string regimeLabel = _isPositiveGamma ? "+ GAMMA" : "- GAMMA";
+                                    List<string> chipParts = new List<string> { regimeLabel };
+
+                                    if (ShowGexValue)
+                                    {
+                                        decimal absGex = Math.Abs(_lastNetGex);
+                                        string gexFormatted;
+
+                                        if (absGex >= 1_000_000_000)
+                                            gexFormatted = $"{absGex / 1_000_000_000:F2}B";
+                                        else if (absGex >= 1_000_000)
+                                            gexFormatted = $"{absGex / 1_000_000:F1}M";
+                                        else if (absGex >= 1_000)
+                                            gexFormatted = $"{absGex / 1_000:F0}K";
+                                        else
+                                            gexFormatted = $"{absGex:F0}";
+
+                                        chipParts.Add(gexFormatted);
+                                    }
+
+                                    if (ShowExpiry)
+                                    {
+                                        chipParts.Add(dteString);
+                                    }
+
+                                    _chipText = string.Join("  |  ", chipParts);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+                _chipText = "WAITING FOR CHAIN...";
+            }
+            catch (Exception ex)
+            {
+                var realError = ex.InnerException != null ? ex.InnerException.Message : ex.Message;
+                string shortErr = realError.Length > 35 ? realError.Substring(0, 35) : realError;
+                _chipText = $"ERR: {shortErr}";
+            }
+        }
+
+        protected override void OnRender(RenderContext context, DrawingLayouts layout)
+        {
+            if (ChartInfo == null || Container == null) return;
+
+            var textSize = context.MeasureString(_chipText, _font);
+
+            int chipWidth = (int)textSize.Width + (Padding * 2);
+            int chipHeight = (int)textSize.Height + (Padding * 2);
+
+            int viewportWidth = Container.Region.Width;
+            int x = HorizontalPosition == HorizontalAlignment.Left
+                ? OffsetX
+                : viewportWidth - chipWidth - OffsetX;
+
+            int y = VerticalPosition == VerticalAlignment.Top
+                ? OffsetY
+                : Container.Region.Height - chipHeight - OffsetY;
+
+            Color bgColor = _isPositiveGamma ? PositiveColor : NegativeColor;
+            Color translucentBg = Color.FromArgb(210, bgColor.R, bgColor.G, bgColor.B);
+
+            context.FillRectangle(translucentBg, new Rectangle(x, y, chipWidth, chipHeight));
+            context.DrawRectangle(new RenderPen(bgColor, 2f), new Rectangle(x, y, chipWidth, chipHeight));
+            context.DrawString(_chipText, _font, TextColor, x + Padding, y + Padding);
+        }
+    }
+}
