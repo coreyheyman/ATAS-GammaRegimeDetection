@@ -26,7 +26,7 @@ Group	Property	Default	Description
 Requirements
 ATAS Platform v5.x or higher with an active options data feed enabled.
 
-<img width="583" height="376" alt="image" src="https://github.com/user-attachments/assets/4a65ada2-129a-4d8d-891b-531915529976" />
+<img width="627" height="378" alt="image" src="https://github.com/user-attachments/assets/ab4258c9-71df-4083-85c3-9493c9e0c3ff" />
 <img width="611" height="621" alt="image" src="https://github.com/user-attachments/assets/254a9b4b-49ad-4698-98cd-c8260072e8a3" />
 
 
