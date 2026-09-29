@@ -26,7 +26,11 @@ Group	Property	Default	Description
 Requirements
 ATAS Platform v5.x or higher with an active options data feed enabled.
 
-Instructions:
+<img width="583" height="376" alt="image" src="https://github.com/user-attachments/assets/4a65ada2-129a-4d8d-891b-531915529976" />
+<img width="611" height="621" alt="image" src="https://github.com/user-attachments/assets/254a9b4b-49ad-4698-98cd-c8260072e8a3" />
+
+
+INSTRUCTIONS:
 
 Option A: Installing via Compiled .dll File (Easiest) If you shared a pre-compiled .dll file, users can install it instantly without editing code:
 
