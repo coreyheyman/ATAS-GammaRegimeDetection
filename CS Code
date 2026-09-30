@@ -10,18 +10,20 @@ using ATAS.DataFeedsCore;
 using OFT.Rendering.Context;
 using OFT.Rendering.Tools;
 
+using DashStyle = System.Drawing.Drawing2D.DashStyle;
+
 namespace CustomIndicators
 {
-    [DisplayName("Gamma Regime (0DTE)")]
+    [DisplayName("Gamma Regime & Key Levels (0DTE)")]
     [Category("OFK Suite")]
     public class GammaChipIndicator : Indicator
     {
         #region Enums
 
         public enum UpdateFrequency { Live, ThirtySeconds, OneMinute, FiveMinutes, ThirtyMinutes, OneHour }
-
         public enum HorizontalAlignment { Left, Right }
         public enum VerticalAlignment { Top, Bottom }
+        public enum LabelAlignment { Left, Center, Right }
 
         #endregion
 
@@ -29,7 +31,7 @@ namespace CustomIndicators
 
         [Display(Name = "Strikes Per Side", GroupName = "1. Options Data", Order = 1)]
         [Range(5, 100)]
-        public int StrikesPerSide { get; set; } = 25;
+        public int StrikesPerSide { get; set; } = 50;
 
         [Display(Name = "0DTE Only", GroupName = "1. Options Data", Order = 2)]
         public bool ZeroDteOnly { get; set; } = true;
@@ -43,6 +45,95 @@ namespace CustomIndicators
         [Display(Name = "Update Frequency", GroupName = "1. Options Data", Order = 5)]
         public UpdateFrequency Frequency { get; set; } = UpdateFrequency.FiveMinutes;
 
+        // --- GLOBAL KEY LEVEL SETTINGS ---
+        [Display(Name = "Text Alignment", GroupName = "4. Key Levels Global", Order = 1)]
+        public LabelAlignment LevelTextAlignment { get; set; } = LabelAlignment.Right;
+
+        [Display(Name = "Font Size", GroupName = "4. Key Levels Global", Order = 2)]
+        [Range(8, 30)]
+        public int LevelFontSize
+        {
+            get => (int)_levelFont.Size;
+            set
+            {
+                if ((int)_levelFont.Size == value) return;
+                _levelFont = new RenderFont("Arial", value, FontStyle.Bold);
+            }
+        }
+
+        // --- CALL WALL SETTINGS ---
+        [Display(Name = "Show Call Wall", GroupName = "5. Call Wall", Order = 1)]
+        public bool ShowCallWall { get; set; } = true;
+
+        [Display(Name = "Line Color", GroupName = "5. Call Wall", Order = 2)]
+        public Color CallWallColor { get; set; } = Color.FromArgb(255, 0, 220, 100);
+
+        [Display(Name = "Zone Color", GroupName = "5. Call Wall", Order = 3)]
+        public Color CallWallZoneColor { get; set; } = Color.FromArgb(45, 0, 220, 100);
+
+        [Display(Name = "Text Color", GroupName = "5. Call Wall", Order = 4)]
+        public Color CallWallTextColor { get; set; } = Color.White;
+
+        [Display(Name = "Line Style", GroupName = "5. Call Wall", Order = 5)]
+        public DashStyle CallWallStyle { get; set; } = DashStyle.Solid;
+
+        [Display(Name = "Line Thickness (px)", GroupName = "5. Call Wall", Order = 6)]
+        [Range(1, 10)]
+        public int CallWallWidth { get; set; } = 2;
+
+        [Display(Name = "Zone Thickness (px)", GroupName = "5. Call Wall", Order = 7)]
+        [Range(0, 50)]
+        public int CallWallZoneThickness { get; set; } = 10;
+
+        // --- PUT WALL SETTINGS ---
+        [Display(Name = "Show Put Wall", GroupName = "6. Put Wall", Order = 1)]
+        public bool ShowPutWall { get; set; } = true;
+
+        [Display(Name = "Line Color", GroupName = "6. Put Wall", Order = 2)]
+        public Color PutWallColor { get; set; } = Color.FromArgb(255, 240, 60, 60);
+
+        [Display(Name = "Zone Color", GroupName = "6. Put Wall", Order = 3)]
+        public Color PutWallZoneColor { get; set; } = Color.FromArgb(45, 240, 60, 60);
+
+        [Display(Name = "Text Color", GroupName = "6. Put Wall", Order = 4)]
+        public Color PutWallTextColor { get; set; } = Color.White;
+
+        [Display(Name = "Line Style", GroupName = "6. Put Wall", Order = 5)]
+        public DashStyle PutWallStyle { get; set; } = DashStyle.Solid;
+
+        [Display(Name = "Line Thickness (px)", GroupName = "6. Put Wall", Order = 6)]
+        [Range(1, 10)]
+        public int PutWallWidth { get; set; } = 2;
+
+        [Display(Name = "Zone Thickness (px)", GroupName = "6. Put Wall", Order = 7)]
+        [Range(0, 50)]
+        public int PutWallZoneThickness { get; set; } = 10;
+
+        // --- GAMMA FLIP SETTINGS ---
+        [Display(Name = "Show Gamma Flip", GroupName = "7. Gamma Flip", Order = 1)]
+        public bool ShowFlipLevel { get; set; } = true;
+
+        [Display(Name = "Line Color", GroupName = "7. Gamma Flip", Order = 2)]
+        public Color FlipColor { get; set; } = Color.FromArgb(255, 255, 165, 0);
+
+        [Display(Name = "Zone Color", GroupName = "7. Gamma Flip", Order = 3)]
+        public Color FlipZoneColor { get; set; } = Color.FromArgb(45, 255, 165, 0);
+
+        [Display(Name = "Text Color", GroupName = "7. Gamma Flip", Order = 4)]
+        public Color FlipTextColor { get; set; } = Color.White;
+
+        [Display(Name = "Line Style", GroupName = "7. Gamma Flip", Order = 5)]
+        public DashStyle FlipStyle { get; set; } = DashStyle.Dash;
+
+        [Display(Name = "Line Thickness (px)", GroupName = "7. Gamma Flip", Order = 6)]
+        [Range(1, 10)]
+        public int FlipWidth { get; set; } = 2;
+
+        [Display(Name = "Zone Thickness (px)", GroupName = "7. Gamma Flip", Order = 7)]
+        [Range(0, 50)]
+        public int FlipZoneThickness { get; set; } = 10;
+
+        // --- LAYOUT & SIZING ---
         [Display(Name = "Horizontal Position", GroupName = "2. Layout & Sizing", Order = 1)]
         public HorizontalAlignment HorizontalPosition { get; set; } = HorizontalAlignment.Left;
 
@@ -88,9 +179,18 @@ namespace CustomIndicators
 
         private DateTime _lastCalculationTime = DateTime.MinValue;
         private RenderFont _font = new("Arial", 12, FontStyle.Bold);
+        private RenderFont _levelFont = new("Arial", 10, FontStyle.Bold);
         private decimal _lastNetGex = 0m;
         private bool _isPositiveGamma = true;
         private string _chipText = "Loading GEX...";
+
+        // Key Levels & Metrics Tracked
+        private decimal _callWallPrice = 0m;
+        private string _callWallMetric = "";
+        private decimal _putWallPrice = 0m;
+        private string _putWallMetric = "";
+        private decimal _flipLevelPrice = 0m;
+        private string _flipMetric = "FLIP";
 
         #endregion
 
@@ -108,7 +208,6 @@ namespace CustomIndicators
         {
             if (bar < CurrentBar - 1) return;
 
-            // Snap updates to clean clock intervals (30 sec, top of the minute, 5 min, 30 min, hour)
             if (Frequency != UpdateFrequency.Live && _chipText != "Loading GEX...")
             {
                 var now = DateTime.Now;
@@ -124,7 +223,6 @@ namespace CustomIndicators
 
                 if (!shouldUpdate) return;
 
-                // Prevent multiple calculations inside the same matching time slot
                 if (Frequency == UpdateFrequency.ThirtySeconds && _lastCalculationTime.Minute == now.Minute && _lastCalculationTime.Second / 30 == now.Second / 30) return;
                 if (Frequency == UpdateFrequency.OneMinute && _lastCalculationTime.Minute == now.Minute) return;
                 if (Frequency == UpdateFrequency.FiveMinutes && _lastCalculationTime.Minute / 5 == now.Minute / 5 && _lastCalculationTime.Hour == now.Hour) return;
@@ -180,34 +278,41 @@ namespace CustomIndicators
                                 {
                                     var contracts = rawOptions.Cast<dynamic>().ToList();
 
-                                    var closestContracts = contracts
+                                    var closestStrikes = contracts
                                         .OrderBy(x => Math.Abs((decimal)x.StrikePrice - spot))
                                         .Take(StrikesPerSide * 4)
-                                        .ToList();
+                                        .Select(x => (decimal)x.StrikePrice)
+                                        .ToHashSet();
 
                                     decimal totalCallGex = 0m;
                                     decimal totalPutGex = 0m;
+
+                                    Dictionary<decimal, decimal> strikeCallGexMap = new();
+                                    Dictionary<decimal, decimal> strikePutGexMap = new();
+                                    Dictionary<decimal, decimal> strikeNetGexMap = new();
+                                    Dictionary<decimal, decimal> strikeOiMap = new();
+
                                     var subMethod = type.GetMethod("SubscribeToOption");
 
-                                    foreach (dynamic contract in closestContracts)
+                                    foreach (dynamic contract in contracts)
                                     {
                                         try
                                         {
                                             decimal strikePrice = (decimal)contract.StrikePrice;
                                             string optType = contract.OptionType.ToString();
                                             decimal oi = 0m;
+                                            bool isClosest = closestStrikes.Contains(strikePrice);
 
                                             try { oi = (decimal)contract.OpenInterest; }
                                             catch { }
 
-                                            if (oi <= 0)
+                                            if (oi <= 0 && isClosest)
                                             {
                                                 var subInstance = subMethod?.Invoke(provider, new object[] { contract });
                                                 if (subInstance != null)
                                                 {
                                                     var summaryProp = subInstance.GetType().GetProperty("Summary");
                                                     var summaryObj = summaryProp?.GetValue(subInstance);
-
                                                     if (summaryObj != null)
                                                     {
                                                         try { oi = (decimal)summaryObj.GetType().GetProperty("OpenInterest")?.GetValue(summaryObj); }
@@ -218,16 +323,75 @@ namespace CustomIndicators
 
                                             if (oi <= 0) continue;
 
-                                            decimal distance = Math.Abs(spot - strikePrice);
-                                            decimal weight = distance > 0 ? 100m / (1m + (distance / 5m)) : 100m;
-                                            decimal estimatedGamma = 0.005m * weight;
+                                            strikeOiMap[strikePrice] = strikeOiMap.GetValueOrDefault(strikePrice, 0m) + oi;
+
+                                            decimal estimatedGamma = 0.005m;
+                                            decimal contractGex = estimatedGamma * oi * spot * 100m;
 
                                             if (optType.Contains("Call"))
-                                                totalCallGex += estimatedGamma * oi * spot * 100m;
+                                            {
+                                                totalCallGex += contractGex;
+                                                if (isClosest) strikeCallGexMap[strikePrice] = strikeCallGexMap.GetValueOrDefault(strikePrice, 0m) + contractGex;
+                                                strikeNetGexMap[strikePrice] = strikeNetGexMap.GetValueOrDefault(strikePrice, 0m) + contractGex;
+                                            }
                                             else if (optType.Contains("Put"))
-                                                totalPutGex += estimatedGamma * oi * spot * 100m;
+                                            {
+                                                totalPutGex += contractGex;
+                                                if (isClosest) strikePutGexMap[strikePrice] = strikePutGexMap.GetValueOrDefault(strikePrice, 0m) + contractGex;
+                                                strikeNetGexMap[strikePrice] = strikeNetGexMap.GetValueOrDefault(strikePrice, 0m) - contractGex;
+                                            }
                                         }
                                         catch { continue; }
+                                    }
+
+                                    // 1. Calculate Call Wall
+                                    if (strikeCallGexMap.Any())
+                                    {
+                                        var bestCall = strikeCallGexMap.OrderByDescending(x => x.Value).First();
+                                        _callWallPrice = bestCall.Key;
+                                        decimal callOi = strikeOiMap.GetValueOrDefault(_callWallPrice, 0m);
+                                        _callWallMetric = bestCall.Value > 1_000_000 ? $"{bestCall.Value / 1_000_000:F1}M GEX" : $"{callOi:N0} OI";
+                                    }
+
+                                    // 2. Calculate Put Wall
+                                    if (strikePutGexMap.Any())
+                                    {
+                                        var bestPut = strikePutGexMap.OrderByDescending(x => x.Value).First();
+                                        _putWallPrice = bestPut.Key;
+                                        decimal putOi = strikeOiMap.GetValueOrDefault(_putWallPrice, 0m);
+                                        _putWallMetric = bestPut.Value > 1_000_000 ? $"{bestPut.Value / 1_000_000:F1}M GEX" : $"{putOi:N0} OI";
+                                    }
+
+                                    // 3. Calculate True Zero-Gamma (Flip) Level 
+                                    var activeStrikes = strikeNetGexMap.Where(x => strikeOiMap.GetValueOrDefault(x.Key, 0m) > 100).ToList();
+                                    if (activeStrikes.Any())
+                                    {
+                                        // Take the active strikes nearest the spot price where both Calls and Puts exist
+                                        var nearbyContestedStrikes = activeStrikes
+                                            .OrderBy(x => Math.Abs(x.Key - spot))
+                                            .Take(25)
+                                            .Where(x => strikeCallGexMap.GetValueOrDefault(x.Key, 0m) > 0 && strikePutGexMap.GetValueOrDefault(x.Key, 0m) > 0)
+                                            .ToList();
+
+                                        decimal flipStrike = spot;
+
+                                        if (nearbyContestedStrikes.Any())
+                                        {
+                                            decimal minAbsNetGex = decimal.MaxValue;
+                                            foreach (var kvp in nearbyContestedStrikes)
+                                            {
+                                                // The flip is where net GEX is closest to true zero among highly contested strikes
+                                                if (Math.Abs(kvp.Value) < minAbsNetGex)
+                                                {
+                                                    minAbsNetGex = Math.Abs(kvp.Value);
+                                                    flipStrike = kvp.Key;
+                                                }
+                                            }
+                                        }
+
+                                        _flipLevelPrice = flipStrike;
+                                        decimal flipOi = strikeOiMap.GetValueOrDefault(_flipLevelPrice, 0m);
+                                        _flipMetric = flipOi > 0 ? $"{flipOi:N0} OI" : "FLIP";
                                     }
 
                                     _lastNetGex = totalCallGex - totalPutGex;
@@ -239,17 +403,9 @@ namespace CustomIndicators
                                     if (ShowGexValue)
                                     {
                                         decimal absGex = Math.Abs(_lastNetGex);
-                                        string gexFormatted;
-
-                                        if (absGex >= 1_000_000_000)
-                                            gexFormatted = $"{absGex / 1_000_000_000:F2}B";
-                                        else if (absGex >= 1_000_000)
-                                            gexFormatted = $"{absGex / 1_000_000:F1}M";
-                                        else if (absGex >= 1_000)
-                                            gexFormatted = $"{absGex / 1_000:F0}K";
-                                        else
-                                            gexFormatted = $"{absGex:F0}";
-
+                                        string gexFormatted = absGex >= 1_000_000_000 ? $"{absGex / 1_000_000_000:F2}B" :
+                                                              absGex >= 1_000_000 ? $"{absGex / 1_000_000:F1}M" :
+                                                              absGex >= 1_000 ? $"{absGex / 1_000:F0}K" : $"{absGex:F0}";
                                         chipParts.Add(gexFormatted);
                                     }
 
@@ -279,19 +435,42 @@ namespace CustomIndicators
         {
             if (ChartInfo == null || Container == null) return;
 
-            var textSize = context.MeasureString(_chipText, _font);
+            int rightEdge = Container.Region.Width;
 
+            int callTagOffset = 0;
+            int putTagOffset = 0;
+            int flipTagOffset = 0;
+
+            if (ShowCallWall && ShowPutWall && _callWallPrice == _putWallPrice)
+            {
+                putTagOffset = 22;
+            }
+
+            if (ShowFlipLevel)
+            {
+                if (_flipLevelPrice == _callWallPrice && _flipLevelPrice == _putWallPrice)
+                    flipTagOffset = 44;
+                else if (_flipLevelPrice == _callWallPrice || _flipLevelPrice == _putWallPrice)
+                    flipTagOffset = 22;
+            }
+
+            // 1. Render Key Levels
+            if (ShowCallWall && _callWallPrice > 0)
+                DrawMultiplexLevel(context, _callWallPrice, $"CALL WALL [{_callWallMetric}]", CallWallColor, CallWallZoneColor, CallWallTextColor, CallWallStyle, CallWallWidth, CallWallZoneThickness, rightEdge, callTagOffset);
+
+            if (ShowPutWall && _putWallPrice > 0)
+                DrawMultiplexLevel(context, _putWallPrice, $"PUT WALL [{_putWallMetric}]", PutWallColor, PutWallZoneColor, PutWallTextColor, PutWallStyle, PutWallWidth, PutWallZoneThickness, rightEdge, putTagOffset);
+
+            if (ShowFlipLevel && _flipLevelPrice > 0)
+                DrawMultiplexLevel(context, _flipLevelPrice, $"GAMMA FLIP [{_flipMetric}]", FlipColor, FlipZoneColor, FlipTextColor, FlipStyle, FlipWidth, FlipZoneThickness, rightEdge, flipTagOffset);
+
+            // 2. Render Main HUD Chip
+            var textSize = context.MeasureString(_chipText, _font);
             int chipWidth = (int)textSize.Width + (Padding * 2);
             int chipHeight = (int)textSize.Height + (Padding * 2);
 
-            int viewportWidth = Container.Region.Width;
-            int x = HorizontalPosition == HorizontalAlignment.Left
-                ? OffsetX
-                : viewportWidth - chipWidth - OffsetX;
-
-            int y = VerticalPosition == VerticalAlignment.Top
-                ? OffsetY
-                : Container.Region.Height - chipHeight - OffsetY;
+            int x = HorizontalPosition == HorizontalAlignment.Left ? OffsetX : rightEdge - chipWidth - OffsetX;
+            int y = VerticalPosition == VerticalAlignment.Top ? OffsetY : Container.Region.Height - chipHeight - OffsetY;
 
             Color bgColor = _isPositiveGamma ? PositiveColor : NegativeColor;
             Color translucentBg = Color.FromArgb(210, bgColor.R, bgColor.G, bgColor.B);
@@ -299,6 +478,37 @@ namespace CustomIndicators
             context.FillRectangle(translucentBg, new Rectangle(x, y, chipWidth, chipHeight));
             context.DrawRectangle(new RenderPen(bgColor, 2f), new Rectangle(x, y, chipWidth, chipHeight));
             context.DrawString(_chipText, _font, TextColor, x + Padding, y + Padding);
+        }
+
+        private void DrawMultiplexLevel(RenderContext context, decimal price, string labelText, Color lineColor, Color zoneColor, Color textColor, DashStyle style, int lineWidth, int zoneThickness, int rightEdge, int tagYOffset)
+        {
+            int yPos = ChartInfo.GetYByPrice(price, false);
+            if (yPos < 0 || yPos > Container.Region.Height) return;
+
+            if (zoneThickness > 0)
+            {
+                int halfThick = zoneThickness / 2;
+                context.FillRectangle(zoneColor, new Rectangle(0, yPos - halfThick, rightEdge, zoneThickness));
+            }
+
+            var pen = new RenderPen(lineColor, lineWidth) { DashStyle = style };
+            context.DrawLine(pen, 0, yPos, rightEdge, yPos);
+
+            var tagSize = context.MeasureString(labelText, _levelFont);
+            int tagX = rightEdge - 20;
+
+            if (LevelTextAlignment == LabelAlignment.Left)
+                tagX = 15;
+            else if (LevelTextAlignment == LabelAlignment.Center)
+                tagX = (rightEdge - (int)tagSize.Width) / 2;
+            else
+                tagX = rightEdge - (int)tagSize.Width - 15;
+
+            int tagY = yPos - (int)tagSize.Height / 2 + tagYOffset;
+
+            context.FillRectangle(Color.FromArgb(220, 15, 20, 30), new Rectangle(tagX - 6, tagY - 3, (int)tagSize.Width + 12, (int)tagSize.Height + 6));
+            context.DrawRectangle(new RenderPen(lineColor, 1f), new Rectangle(tagX - 6, tagY - 3, (int)tagSize.Width + 12, (int)tagSize.Height + 6));
+            context.DrawString(labelText, _levelFont, textColor, tagX, tagY);
         }
     }
 }
