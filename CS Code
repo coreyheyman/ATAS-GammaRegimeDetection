@@ -33,8 +33,9 @@ namespace CustomIndicators
         [Range(5, 100)]
         public int StrikesPerSide { get; set; } = 50;
 
-        [Display(Name = "0DTE Only", GroupName = "1. Options Data", Order = 2)]
-        public bool ZeroDteOnly { get; set; } = true;
+        [Display(Name = "Target Expiry (DTE)", GroupName = "1. Options Data", Order = 2)]
+        [Range(0, 365)]
+        public int TargetDte { get; set; } = 0;
 
         [Display(Name = "Show Net GEX Value", GroupName = "1. Options Data", Order = 3)]
         public bool ShowGexValue { get; set; } = true;
@@ -165,10 +166,10 @@ namespace CustomIndicators
         public int Padding { get; set; } = 8;
 
         [Display(Name = "+ Gamma Color", GroupName = "3. Colors", Order = 1)]
-        public Color PositiveColor { get; set; } = Color.FromArgb(255, 0, 200, 80);
+        public Color PositiveColor { get; set; } = Color.FromArgb(200, 0, 200, 80);
 
         [Display(Name = "- Gamma Color", GroupName = "3. Colors", Order = 2)]
-        public Color NegativeColor { get; set; } = Color.FromArgb(255, 230, 50, 50);
+        public Color NegativeColor { get; set; } = Color.FromArgb(200, 230, 50, 50);
 
         [Display(Name = "Text Color", GroupName = "3. Colors", Order = 3)]
         public Color TextColor { get; set; } = Color.White;
@@ -259,163 +260,166 @@ namespace CustomIndicators
 
                         if (seriesList.Any())
                         {
-                            var targetSeries = ZeroDteOnly
-                                ? seriesList.FirstOrDefault(s => s.Expiration.Date == DateTime.Today) ?? seriesList.OrderBy(s => s.Expiration).FirstOrDefault()
-                                : seriesList.OrderBy(s => s.Expiration).FirstOrDefault();
+                            var activeSeries = seriesList.Where(s => s.Expiration.Date >= DateTime.Today).ToList();
 
-                            if (targetSeries != null)
+                            if (activeSeries.Any())
                             {
-                                DateTime expDate = targetSeries.Expiration;
-                                int dte = (expDate.Date - DateTime.Today).Days;
-                                if (dte < 0) dte = 0;
-                                string dteString = $"{dte}DTE";
+                                // Dynamic DTE Targeter
+                                // Finds the expiration date whose actual DTE is mathematically closest to the user's TargetDte setting
+                                var targetSeries = activeSeries.OrderBy(s => Math.Abs((s.Expiration.Date - DateTime.Today).Days - TargetDte)).FirstOrDefault();
 
-                                var optionsMethod = type.GetMethod("GetOptionsAsync");
-                                var optionsTask = optionsMethod?.Invoke(provider, new object[] { targetSeries, System.Threading.CancellationToken.None });
-                                var rawOptions = optionsTask?.GetType().GetProperty("Result")?.GetValue(optionsTask) as System.Collections.IEnumerable;
-
-                                if (rawOptions != null)
+                                if (targetSeries != null)
                                 {
-                                    var contracts = rawOptions.Cast<dynamic>().ToList();
+                                    DateTime expDate = targetSeries.Expiration;
+                                    int dte = (expDate.Date - DateTime.Today).Days;
+                                    if (dte < 0) dte = 0;
+                                    string dteString = $"{dte}DTE";
 
-                                    var closestStrikes = contracts
-                                        .OrderBy(x => Math.Abs((decimal)x.StrikePrice - spot))
-                                        .Take(StrikesPerSide * 4)
-                                        .Select(x => (decimal)x.StrikePrice)
-                                        .ToHashSet();
+                                    var optionsMethod = type.GetMethod("GetOptionsAsync");
+                                    var optionsTask = optionsMethod?.Invoke(provider, new object[] { targetSeries, System.Threading.CancellationToken.None });
+                                    var rawOptions = optionsTask?.GetType().GetProperty("Result")?.GetValue(optionsTask) as System.Collections.IEnumerable;
 
-                                    decimal totalCallGex = 0m;
-                                    decimal totalPutGex = 0m;
-
-                                    Dictionary<decimal, decimal> strikeCallGexMap = new();
-                                    Dictionary<decimal, decimal> strikePutGexMap = new();
-                                    Dictionary<decimal, decimal> strikeNetGexMap = new();
-                                    Dictionary<decimal, decimal> strikeOiMap = new();
-
-                                    var subMethod = type.GetMethod("SubscribeToOption");
-
-                                    foreach (dynamic contract in contracts)
+                                    if (rawOptions != null)
                                     {
-                                        try
+                                        var contracts = rawOptions.Cast<dynamic>().ToList();
+
+                                        var closestStrikes = contracts
+                                            .OrderBy(x => Math.Abs((decimal)x.StrikePrice - spot))
+                                            .Take(StrikesPerSide * 4)
+                                            .Select(x => (decimal)x.StrikePrice)
+                                            .ToHashSet();
+
+                                        decimal totalCallGex = 0m;
+                                        decimal totalPutGex = 0m;
+
+                                        Dictionary<decimal, decimal> strikeCallGexMap = new();
+                                        Dictionary<decimal, decimal> strikePutGexMap = new();
+                                        Dictionary<decimal, decimal> strikeNetGexMap = new();
+                                        Dictionary<decimal, decimal> strikeOiMap = new();
+
+                                        var subMethod = type.GetMethod("SubscribeToOption");
+
+                                        foreach (dynamic contract in contracts)
                                         {
-                                            decimal strikePrice = (decimal)contract.StrikePrice;
-                                            string optType = contract.OptionType.ToString();
-                                            decimal oi = 0m;
-                                            bool isClosest = closestStrikes.Contains(strikePrice);
-
-                                            try { oi = (decimal)contract.OpenInterest; }
-                                            catch { }
-
-                                            if (oi <= 0 && isClosest)
+                                            try
                                             {
-                                                var subInstance = subMethod?.Invoke(provider, new object[] { contract });
-                                                if (subInstance != null)
+                                                decimal strikePrice = (decimal)contract.StrikePrice;
+                                                string optType = contract.OptionType.ToString();
+                                                decimal oi = 0m;
+                                                bool isClosest = closestStrikes.Contains(strikePrice);
+
+                                                try { oi = (decimal)contract.OpenInterest; }
+                                                catch { }
+
+                                                if (oi <= 0 && isClosest)
                                                 {
-                                                    var summaryProp = subInstance.GetType().GetProperty("Summary");
-                                                    var summaryObj = summaryProp?.GetValue(subInstance);
-                                                    if (summaryObj != null)
+                                                    var subInstance = subMethod?.Invoke(provider, new object[] { contract });
+                                                    if (subInstance != null)
                                                     {
-                                                        try { oi = (decimal)summaryObj.GetType().GetProperty("OpenInterest")?.GetValue(summaryObj); }
-                                                        catch { }
+                                                        var summaryProp = subInstance.GetType().GetProperty("Summary");
+                                                        var summaryObj = summaryProp?.GetValue(subInstance);
+                                                        if (summaryObj != null)
+                                                        {
+                                                            try { oi = (decimal)summaryObj.GetType().GetProperty("OpenInterest")?.GetValue(summaryObj); }
+                                                            catch { }
+                                                        }
+                                                    }
+                                                }
+
+                                                if (oi <= 0) continue;
+
+                                                strikeOiMap[strikePrice] = strikeOiMap.GetValueOrDefault(strikePrice, 0m) + oi;
+
+                                                decimal estimatedGamma = 0.005m;
+                                                decimal contractGex = estimatedGamma * oi * spot * 100m;
+
+                                                if (optType.Contains("Call"))
+                                                {
+                                                    totalCallGex += contractGex;
+                                                    if (isClosest) strikeCallGexMap[strikePrice] = strikeCallGexMap.GetValueOrDefault(strikePrice, 0m) + contractGex;
+                                                    strikeNetGexMap[strikePrice] = strikeNetGexMap.GetValueOrDefault(strikePrice, 0m) + contractGex;
+                                                }
+                                                else if (optType.Contains("Put"))
+                                                {
+                                                    totalPutGex += contractGex;
+                                                    if (isClosest) strikePutGexMap[strikePrice] = strikePutGexMap.GetValueOrDefault(strikePrice, 0m) + contractGex;
+                                                    strikeNetGexMap[strikePrice] = strikeNetGexMap.GetValueOrDefault(strikePrice, 0m) - contractGex;
+                                                }
+                                            }
+                                            catch { continue; }
+                                        }
+
+                                        // 1. Calculate Call Wall
+                                        if (strikeCallGexMap.Any())
+                                        {
+                                            var bestCall = strikeCallGexMap.OrderByDescending(x => x.Value).First();
+                                            _callWallPrice = bestCall.Key;
+                                            decimal callOi = strikeOiMap.GetValueOrDefault(_callWallPrice, 0m);
+                                            _callWallMetric = bestCall.Value > 1_000_000 ? $"{bestCall.Value / 1_000_000:F1}M GEX" : $"{callOi:N0} OI";
+                                        }
+
+                                        // 2. Calculate Put Wall
+                                        if (strikePutGexMap.Any())
+                                        {
+                                            var bestPut = strikePutGexMap.OrderByDescending(x => x.Value).First();
+                                            _putWallPrice = bestPut.Key;
+                                            decimal putOi = strikeOiMap.GetValueOrDefault(_putWallPrice, 0m);
+                                            _putWallMetric = bestPut.Value > 1_000_000 ? $"{bestPut.Value / 1_000_000:F1}M GEX" : $"{putOi:N0} OI";
+                                        }
+
+                                        // 3. Calculate True Zero-Gamma (Flip) Level 
+                                        var activeStrikes = strikeNetGexMap.Where(x => strikeOiMap.GetValueOrDefault(x.Key, 0m) > 100).ToList();
+                                        if (activeStrikes.Any())
+                                        {
+                                            var nearbyContestedStrikes = activeStrikes
+                                                .OrderBy(x => Math.Abs(x.Key - spot))
+                                                .Take(25)
+                                                .Where(x => strikeCallGexMap.GetValueOrDefault(x.Key, 0m) > 0 && strikePutGexMap.GetValueOrDefault(x.Key, 0m) > 0)
+                                                .ToList();
+
+                                            decimal flipStrike = spot;
+
+                                            if (nearbyContestedStrikes.Any())
+                                            {
+                                                decimal minAbsNetGex = decimal.MaxValue;
+                                                foreach (var kvp in nearbyContestedStrikes)
+                                                {
+                                                    if (Math.Abs(kvp.Value) < minAbsNetGex)
+                                                    {
+                                                        minAbsNetGex = Math.Abs(kvp.Value);
+                                                        flipStrike = kvp.Key;
                                                     }
                                                 }
                                             }
 
-                                            if (oi <= 0) continue;
-
-                                            strikeOiMap[strikePrice] = strikeOiMap.GetValueOrDefault(strikePrice, 0m) + oi;
-
-                                            decimal estimatedGamma = 0.005m;
-                                            decimal contractGex = estimatedGamma * oi * spot * 100m;
-
-                                            if (optType.Contains("Call"))
-                                            {
-                                                totalCallGex += contractGex;
-                                                if (isClosest) strikeCallGexMap[strikePrice] = strikeCallGexMap.GetValueOrDefault(strikePrice, 0m) + contractGex;
-                                                strikeNetGexMap[strikePrice] = strikeNetGexMap.GetValueOrDefault(strikePrice, 0m) + contractGex;
-                                            }
-                                            else if (optType.Contains("Put"))
-                                            {
-                                                totalPutGex += contractGex;
-                                                if (isClosest) strikePutGexMap[strikePrice] = strikePutGexMap.GetValueOrDefault(strikePrice, 0m) + contractGex;
-                                                strikeNetGexMap[strikePrice] = strikeNetGexMap.GetValueOrDefault(strikePrice, 0m) - contractGex;
-                                            }
+                                            _flipLevelPrice = flipStrike;
+                                            decimal flipOi = strikeOiMap.GetValueOrDefault(_flipLevelPrice, 0m);
+                                            _flipMetric = flipOi > 0 ? $"{flipOi:N0} OI" : "FLIP";
                                         }
-                                        catch { continue; }
-                                    }
 
-                                    // 1. Calculate Call Wall
-                                    if (strikeCallGexMap.Any())
-                                    {
-                                        var bestCall = strikeCallGexMap.OrderByDescending(x => x.Value).First();
-                                        _callWallPrice = bestCall.Key;
-                                        decimal callOi = strikeOiMap.GetValueOrDefault(_callWallPrice, 0m);
-                                        _callWallMetric = bestCall.Value > 1_000_000 ? $"{bestCall.Value / 1_000_000:F1}M GEX" : $"{callOi:N0} OI";
-                                    }
+                                        _lastNetGex = totalCallGex - totalPutGex;
+                                        _isPositiveGamma = _lastNetGex >= 0;
 
-                                    // 2. Calculate Put Wall
-                                    if (strikePutGexMap.Any())
-                                    {
-                                        var bestPut = strikePutGexMap.OrderByDescending(x => x.Value).First();
-                                        _putWallPrice = bestPut.Key;
-                                        decimal putOi = strikeOiMap.GetValueOrDefault(_putWallPrice, 0m);
-                                        _putWallMetric = bestPut.Value > 1_000_000 ? $"{bestPut.Value / 1_000_000:F1}M GEX" : $"{putOi:N0} OI";
-                                    }
+                                        string regimeLabel = _isPositiveGamma ? "+ GAMMA" : "- GAMMA";
+                                        List<string> chipParts = new List<string> { regimeLabel };
 
-                                    // 3. Calculate True Zero-Gamma (Flip) Level 
-                                    var activeStrikes = strikeNetGexMap.Where(x => strikeOiMap.GetValueOrDefault(x.Key, 0m) > 100).ToList();
-                                    if (activeStrikes.Any())
-                                    {
-                                        // Take the active strikes nearest the spot price where both Calls and Puts exist
-                                        var nearbyContestedStrikes = activeStrikes
-                                            .OrderBy(x => Math.Abs(x.Key - spot))
-                                            .Take(25)
-                                            .Where(x => strikeCallGexMap.GetValueOrDefault(x.Key, 0m) > 0 && strikePutGexMap.GetValueOrDefault(x.Key, 0m) > 0)
-                                            .ToList();
-
-                                        decimal flipStrike = spot;
-
-                                        if (nearbyContestedStrikes.Any())
+                                        if (ShowGexValue)
                                         {
-                                            decimal minAbsNetGex = decimal.MaxValue;
-                                            foreach (var kvp in nearbyContestedStrikes)
-                                            {
-                                                // The flip is where net GEX is closest to true zero among highly contested strikes
-                                                if (Math.Abs(kvp.Value) < minAbsNetGex)
-                                                {
-                                                    minAbsNetGex = Math.Abs(kvp.Value);
-                                                    flipStrike = kvp.Key;
-                                                }
-                                            }
+                                            decimal absGex = Math.Abs(_lastNetGex);
+                                            string gexFormatted = absGex >= 1_000_000_000 ? $"{absGex / 1_000_000_000:F2}B" :
+                                                                  absGex >= 1_000_000 ? $"{absGex / 1_000_000:F1}M" :
+                                                                  absGex >= 1_000 ? $"{absGex / 1_000:F0}K" : $"{absGex:F0}";
+                                            chipParts.Add(gexFormatted);
                                         }
 
-                                        _flipLevelPrice = flipStrike;
-                                        decimal flipOi = strikeOiMap.GetValueOrDefault(_flipLevelPrice, 0m);
-                                        _flipMetric = flipOi > 0 ? $"{flipOi:N0} OI" : "FLIP";
+                                        if (ShowExpiry)
+                                        {
+                                            chipParts.Add(dteString);
+                                        }
+
+                                        _chipText = string.Join("  |  ", chipParts);
+                                        return;
                                     }
-
-                                    _lastNetGex = totalCallGex - totalPutGex;
-                                    _isPositiveGamma = _lastNetGex >= 0;
-
-                                    string regimeLabel = _isPositiveGamma ? "+ GAMMA" : "- GAMMA";
-                                    List<string> chipParts = new List<string> { regimeLabel };
-
-                                    if (ShowGexValue)
-                                    {
-                                        decimal absGex = Math.Abs(_lastNetGex);
-                                        string gexFormatted = absGex >= 1_000_000_000 ? $"{absGex / 1_000_000_000:F2}B" :
-                                                              absGex >= 1_000_000 ? $"{absGex / 1_000_000:F1}M" :
-                                                              absGex >= 1_000 ? $"{absGex / 1_000:F0}K" : $"{absGex:F0}";
-                                        chipParts.Add(gexFormatted);
-                                    }
-
-                                    if (ShowExpiry)
-                                    {
-                                        chipParts.Add(dteString);
-                                    }
-
-                                    _chipText = string.Join("  |  ", chipParts);
-                                    return;
                                 }
                             }
                         }
@@ -473,10 +477,8 @@ namespace CustomIndicators
             int y = VerticalPosition == VerticalAlignment.Top ? OffsetY : Container.Region.Height - chipHeight - OffsetY;
 
             Color bgColor = _isPositiveGamma ? PositiveColor : NegativeColor;
-            Color translucentBg = Color.FromArgb(210, bgColor.R, bgColor.G, bgColor.B);
 
-            context.FillRectangle(translucentBg, new Rectangle(x, y, chipWidth, chipHeight));
-            context.DrawRectangle(new RenderPen(bgColor, 2f), new Rectangle(x, y, chipWidth, chipHeight));
+            context.FillRectangle(bgColor, new Rectangle(x, y, chipWidth, chipHeight));
             context.DrawString(_chipText, _font, TextColor, x + Padding, y + Padding);
         }
 
